@@ -5,7 +5,7 @@ All notable changes to nosqlsync are recorded here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Before 1.0, a minor
 version (0.x.0) may change behaviour or the plan file format.
 
-## [0.1.2] - unreleased
+## [0.1.2] - 2026-10-23
 
 ### Added
 
@@ -51,6 +51,6 @@ First release.
 - Validation of exact counts and sampled rows, with Markdown or JSON reports.
 - Binaries for macOS (Apple Silicon and Intel) and Linux (x86_64 and arm64).
 
-[0.1.2]: https://github.com/NoSQLSync/nosqlsync/compare/v0.1.1...main
+[0.1.2]: https://github.com/NoSQLSync/nosqlsync/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/NoSQLSync/nosqlsync/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/NoSQLSync/nosqlsync/releases/tag/v0.1.0
