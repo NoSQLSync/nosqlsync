@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: fmt, clippy, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+
+  e2e:
+    name: end to end (MongoDB → PostgreSQL)
+    runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:8
+        ports: ["27017:27017"]
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: shop
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 5s --health-retries 20
+    env:
+      NOSQLSYNC_SOURCE: mongodb://localhost:27017/shop
+      NOSQLSYNC_TARGET: postgres://postgres:test@localhost:5432/shop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p nosqlsync-cli
+      - name: Seed MongoDB
+        run: |
+          docker run --rm --network host -v "$PWD/tests/e2e:/e2e" mongo:8 \
+            mongosh --quiet mongodb://localhost:27017/shop /e2e/seed.js
+      - name: analyze, plan, migrate, validate
+        run: |
+          B=./target/release/nosqlsync
+          $B analyze
+          $B plan
+          $B migrate --plan nosqlsync.plan.json
+          $B validate --plan nosqlsync.plan.json --compare 500 --report report.md
+      - name: Re-running migrate is a no-op
+        run: ./target/release/nosqlsync migrate --plan nosqlsync.plan.json | grep "already loaded"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: validation-report
+          path: report.md

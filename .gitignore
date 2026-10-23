@@ -1,0 +1,5 @@
+/target/
+nosqlsync.plan.json
+nosqlsync.schema.sql
+report.md
+.DS_Store

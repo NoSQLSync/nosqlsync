@@ -1,0 +1,18 @@
+[package]
+name = "nosqlsync-core"
+description = "Schema inference and relational modeling for NoSQL-to-SQL migrations. Pure, no I/O."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords = ["mongodb", "postgres", "migration", "schema", "etl"]
+categories = ["database"]
+
+[dependencies]
+base64 = "0.23.1"
+chrono = { version = "0.4.45", default-features = false, features = ["std", "alloc"] }
+indexmap = "2.14.2"
+regex = "1.13.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.154", features = ["preserve_order", "float_roundtrip"] }
