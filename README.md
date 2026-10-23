@@ -39,7 +39,13 @@ orders → table orders (300 documents sampled)
 
 ## Install
 
-Download a binary for macOS (Apple Silicon or Intel) or Linux (x86_64 or
+With [Homebrew](https://brew.sh) on macOS or Linux:
+
+```sh
+brew install nosqlsync/tap/nosqlsync
+```
+
+Or download a binary for macOS (Apple Silicon or Intel) or Linux (x86_64 or
 arm64) from [Releases](https://github.com/NoSQLSync/nosqlsync/releases), unpack
 it, and put `nosqlsync` on your `PATH`.
 
