@@ -1,0 +1,88 @@
+name: npm
+
+# Publishes `nosqlsync` (the npx launcher) and the four @nosqlsync/<platform>
+# packages holding the release binaries. Called by the release workflow after
+# each release; can also be run by hand (Actions → npm → Run workflow).
+# Versions already on npm are skipped, so re-running is safe.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, e.g. v0.1.1"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  id-token: write # npm provenance
+
+jobs:
+  publish:
+    name: publish to npm
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag }}
+    steps:
+      - name: Check for NPM_TOKEN
+        id: token
+        env:
+          TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::warning::NPM_TOKEN is not set, so nothing was published to npm."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.token.outputs.ok == 'true'
+
+      - uses: actions/setup-node@v4
+        if: steps.token.outputs.ok == 'true'
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Download and verify the release binaries
+        if: steps.token.outputs.ok == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern 'nosqlsync-*' --dir dist
+          (cd dist && sha256sum -c *.sha256)
+
+      - name: Build packages
+        if: steps.token.outputs.ok == 'true'
+        run: node npm/build.mjs "$TAG" dist out
+
+      - name: Smoke test before publishing
+        if: steps.token.outputs.ok == 'true'
+        run: |
+          mkdir packed app
+          for d in out/*; do (cd "$d" && npm pack --pack-destination ../../packed); done
+          cd app && npm init -y >/dev/null
+          npm install --no-audit --no-fund ../packed/nosqlsync-linux-x64-*.tgz ../packed/nosqlsync-[0-9]*.tgz
+          npx --no-install nosqlsync --version | grep -qx "nosqlsync ${TAG#v}"
+          echo '[{"_id": {"$oid": "507f1f77bcf86cd799439011"}, "address": {"city": "Oslo"}}]' > orders.json
+          npx --no-install nosqlsync analyze --source orders.json | grep -q address_city
+
+      - name: Publish (platform packages first)
+        if: steps.token.outputs.ok == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          for d in out/darwin-arm64 out/darwin-x64 out/linux-arm64 out/linux-x64 out/nosqlsync; do
+            name=$(node -p "require('./$d/package.json').name")
+            version=$(node -p "require('./$d/package.json').version")
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "$name@$version is already on npm; skipping."
+              continue
+            fi
+            (cd "$d" && npm publish --access public --provenance)
+          done
