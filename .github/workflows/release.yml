@@ -1,6 +1,7 @@
 name: Release
 
-# Push a tag like v0.1.0 to build binaries and publish a GitHub Release.
+# Push a tag like v0.1.1 to build binaries, publish a GitHub Release, and
+# publish the crates to crates.io. The tag must match the workspace version.
 on:
   push:
     tags: ["v*"]
@@ -12,8 +13,21 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  version:
+    name: tag matches Cargo.toml
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          version=$(grep -m1 '^version = ' Cargo.toml | cut -d '"' -f2)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match Cargo.toml version $version"
+            exit 1
+          fi
+
   build:
     name: build ${{ matrix.target }}
+    needs: version
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -31,7 +45,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
-      - run: cargo build --release --locked -p nosqlsync-cli --target ${{ matrix.target }}
+      - run: cargo build --release --locked -p nosqlsync --target ${{ matrix.target }}
       - name: Package
         shell: bash
         run: |
@@ -56,3 +70,15 @@ jobs:
         with:
           files: nosqlsync-*.tar.gz*
           generate_release_notes: true
+
+  crates-io:
+    name: publish to crates.io
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # Publishes nosqlsync-core, then nosqlsync, in dependency order.
+      - run: cargo publish --workspace --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

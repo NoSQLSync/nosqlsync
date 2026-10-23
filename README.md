@@ -43,10 +43,10 @@ Download a binary for macOS (Apple Silicon or Intel) or Linux (x86_64 or
 arm64) from [Releases](https://github.com/NoSQLSync/nosqlsync/releases), unpack
 it, and put `nosqlsync` on your `PATH`.
 
-Or build from source, with a Rust toolchain:
+Or with a Rust toolchain:
 
 ```sh
-cargo install --git https://github.com/NoSQLSync/nosqlsync nosqlsync-cli
+cargo install nosqlsync
 ```
 
 ## Use it
@@ -165,7 +165,7 @@ cargo clippy --workspace --all-targets
 ```
 
 `nosqlsync-core` is the engine: pure, with no I/O, so it can also be compiled to
-WebAssembly. `nosqlsync-cli` adds the MongoDB and file sources and the Postgres
+WebAssembly. `nosqlsync` (in `nosqlsync-cli/`) adds the MongoDB and file sources and the Postgres
 loader.
 
 The engine makes the same schema decisions as the hosted NoSQLSync platform: a
