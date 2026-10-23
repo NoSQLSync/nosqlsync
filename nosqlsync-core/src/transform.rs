@@ -15,14 +15,23 @@ use crate::infer::{NUMERIC, UUID};
 use crate::types::{FieldMapping, MongoType};
 
 #[derive(Clone, PartialEq, Debug)]
+/// One typed value for one column of one row.
 pub enum Cell {
+    /// SQL NULL: a missing or null source value, or one that failed coercion.
     Null,
+    /// Text, ObjectId hex, or a UUID string.
     Text(String),
+    /// An integer; Int64 values are exact.
     Int(i64),
+    /// A double, including NaN and ±Infinity.
     Float(f64),
+    /// A boolean.
     Bool(bool),
+    /// A point in time. COPY encodes it at millisecond precision.
     Timestamp(DateTime<Utc>),
+    /// Binary data, written as bytea hex.
     Bytes(Vec<u8>),
+    /// An array or object, Extended JSON wrappers unwrapped by [`plain_json`].
     Json(Value),
     /// An exact decimal (from Decimal128), kept as its digits.
     Numeric(String),
@@ -31,11 +40,15 @@ pub enum Cell {
 /// A value that could not be coerced to its column's type.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CoercionIssue {
+    /// Target column name.
     pub column: String,
+    /// The column's resolved source type.
     pub expected: MongoType,
+    /// The offending value as JSON, cut to 60 characters plus `…`.
     pub value: String,
 }
 
+/// The value at a dot path, or `null` when any step is missing or not an object.
 pub fn get_nested<'a>(doc: &'a Value, path: &str) -> &'a Value {
     let mut cur = doc;
     for part in path.split('.') {
@@ -51,6 +64,11 @@ pub fn get_nested<'a>(doc: &'a Value, path: &str) -> &'a Value {
 }
 
 /// Coerce one source value to the cell its column expects.
+///
+/// `null` is always [`Cell::Null`]. Booleans are JavaScript truthiness, so
+/// they never fail: `0`, `""` and `NaN` are false, and any other string
+/// (including `"false"`) is true. Dates accept `$date`, `$timestamp`, RFC 3339
+/// or `YYYY-MM-DD` strings, and integers as epoch milliseconds.
 pub fn coerce(value: &Value, m: &FieldMapping) -> Result<Cell, CoercionIssue> {
     if value.is_null() {
         return Ok(Cell::Null);
@@ -321,6 +339,7 @@ pub fn copy_cell(cell: &Cell, out: &mut String) {
     }
 }
 
+/// Encode one row for `COPY … FROM STDIN`: tab-separated cells and a trailing newline.
 pub fn copy_row(row: &[Cell], out: &mut String) {
     for (i, cell) in row.iter().enumerate() {
         if i > 0 {

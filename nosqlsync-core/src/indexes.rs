@@ -26,18 +26,28 @@ static REFERENCE_NAME: LazyLock<Regex> =
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "kebab-case")]
+/// Why a column was chosen for an index.
 pub enum IndexReason {
+    /// The column holds ObjectIds.
     ObjectidReference,
+    /// A string column whose source field name looks like a reference (`user_id`, `authorId`).
     NamedReference,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+/// A single-column index on the parent table.
 pub struct TargetIndex {
+    /// Index name from [`index_name`].
     pub name: String,
+    /// Indexed column.
     pub column: String,
+    /// Why it was chosen.
     pub reason: IndexReason,
 }
 
+/// Indexes for the reference columns among `mappings`, in mapping order, at
+/// most 10. The primary key is skipped, as is any column whose index name
+/// collides with one already chosen.
 pub fn plan_indexes(table: &str, mappings: &[FieldMapping]) -> Vec<TargetIndex> {
     let mut out = Vec::new();
     let mut used = HashSet::new();
@@ -68,6 +78,8 @@ pub fn plan_indexes(table: &str, mappings: &[FieldMapping]) -> Vec<TargetIndex> 
     out
 }
 
+/// `idx_<table>_<column>`, lowercased, with anything outside `[A-Za-z0-9_]`
+/// replaced by `_`, and cut to its last 63 characters if longer.
 /// Deterministic, so re-running against an existing table is a no-op.
 pub fn index_name(table: &str, column: &str) -> String {
     let base: String = format!("idx_{table}_{column}")

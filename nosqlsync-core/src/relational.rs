@@ -22,25 +22,38 @@ use crate::types::{to_column_name, to_sql_type, Dialect, MongoType};
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "kebab-case")]
+/// The shape of a nested path.
 pub enum NestedKind {
+    /// An object that is not an Extended JSON wrapper.
     EmbeddedObject,
+    /// An array holding at least one object in at least one document.
     ObjectArray,
+    /// An array that never held an object in the sample.
     ScalarArray,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "kebab-case")]
+/// What the model suggests doing with a nested path. The user's choice is a
+/// [`NestedDecision`](crate::flatten::NestedDecision).
 pub enum Recommendation {
+    /// Expand into prefixed columns on the parent table.
     Flatten,
+    /// Move into its own table with a foreign key to the parent.
     ChildTable,
+    /// Keep as one JSON column.
     Jsonb,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
+/// One key seen inside a nested object or array element.
 pub struct SubField {
+    /// Key name, relative to the containing object.
     pub name: String,
+    /// Most frequent non-null type; ties go to the type seen first. `Null` if never non-null.
     pub mongo_type: MongoType,
+    /// The generic [`to_sql_type`] for `mongo_type`, with no `BIGINT`/`NUMERIC`/`UUID` refinement.
     pub sql_type: String,
     /// Fraction of the containing structures where this field is present, 0–1.
     pub presence: f64,
@@ -48,56 +61,83 @@ pub struct SubField {
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
+/// A column a flattened object would produce.
 pub struct FlattenedColumn {
+    /// Dot path of the subfield, e.g. `address.city`.
     pub path: String,
+    /// Proposed column name, e.g. `address_city`.
     pub column: String,
+    /// The subfield's SQL type.
     pub sql_type: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
+/// One nested path found in the sample, with the evidence for its recommendation.
 pub struct NestedStructure {
+    /// Dot path from the document root, e.g. `address.geo`.
     pub path: String,
+    /// Object, array of objects, or array of scalars.
     pub kind: NestedKind,
     /// Fraction of sampled documents containing this path, 0–1.
     pub frequency: f64,
     /// Mean presence of its subfields, 0–1.
     pub consistency: f64,
-    /// Mean element count, for arrays.
+    /// Mean element count per document containing the array; 0 for objects.
     pub average_length: f64,
+    /// Keys seen in the object (or in the array's object elements), most present first.
     pub sub_fields: Vec<SubField>,
+    /// The suggested treatment.
     pub recommendation: Recommendation,
+    /// One or two sentences explaining `recommendation`, for people reading the plan.
     pub reason: String,
+    /// Set only when `recommendation` is `ChildTable`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub child_table_name: Option<String>,
+    /// Set only when `recommendation` is `Flatten`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub flattened_columns: Option<Vec<FlattenedColumn>>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "lowercase")]
+/// How sure a [`ForeignKeyCandidate`] is.
 pub enum Confidence {
+    /// Every occurrence of the field looked like a reference.
     High,
+    /// At least 90% of occurrences did.
     Medium,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
+/// A field that probably references another collection: it held an ObjectId,
+/// or a string under a name that [`looks_like_reference`], in at least 90% of
+/// its non-missing occurrences (a `null` counts against it).
 pub struct ForeignKeyCandidate {
+    /// Dot path of the field (`_id` itself is never a candidate).
     pub path: String,
+    /// The path as a column name.
     pub column: String,
     /// Best guess at the collection this points at, from the field name.
     pub references_collection: Option<String>,
+    /// `High` at 100% of occurrences, `Medium` from 90%.
     pub confidence: Confidence,
+    /// Human-readable explanation.
     pub reason: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
+/// The result of [`analyze_relationships`] for one collection.
 pub struct RelationalModel {
+    /// Parent table name the child-table names are prefixed with.
     pub root_table: String,
+    /// Number of documents analyzed.
     pub documents_sampled: usize,
+    /// Nested paths in at least 5% of documents, most frequent first, then by path.
     pub nested: Vec<NestedStructure>,
+    /// Reference-like fields, sorted by path.
     pub foreign_keys: Vec<ForeignKeyCandidate>,
 }
 
@@ -134,6 +174,13 @@ struct Walk {
     mode: Detect,
 }
 
+/// Find the nested structures and reference fields in a sample.
+///
+/// Embedded objects are walked recursively, so `address.geo` is modeled as
+/// well as `address`; array elements are not, so structure inside an array's
+/// subdocuments is only seen as those subdocuments' fields. Objects flatten
+/// when at least 90% consistent with at most 8 subfields; object arrays become
+/// child tables when at least 90% consistent; everything else stays JSON.
 pub fn analyze_relationships(
     docs: &[Value],
     root_table: &str,
@@ -460,6 +507,8 @@ pub fn child_table_name(root: &str, path: &str) -> String {
     to_column_name(&format!("{root}_{}", path.replace('.', "_")))
 }
 
+/// Is this field name shaped like a reference: `id`, ending in `_id` or `.id`,
+/// or camelCase ending in `Id`/`ID` (`authorId`)? Case-sensitive, so `paid` is not.
 pub fn looks_like_reference(field: &str) -> bool {
     REFERENCE.is_match(field)
 }

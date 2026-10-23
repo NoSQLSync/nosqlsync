@@ -15,9 +15,11 @@ use crate::types::{quote_ident, to_column_name, Dialect, FieldMapping};
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
+/// One child table: rows are the object elements of one array path.
 pub struct ChildTable {
     /// Dot path of the array in the parent document, e.g. `items`.
     pub source_path: String,
+    /// Parent table name plus the path, e.g. `orders_items`.
     pub table_name: String,
     /// FK column in the child table, referencing the parent's primary key.
     pub parent_id_column: String,
@@ -33,6 +35,12 @@ pub fn supports_child_tables(dialect: Dialect) -> bool {
     )
 }
 
+/// One [`ChildTable`] per path decided `child-table`, sorted by path. Empty for
+/// dialects without child-table support.
+///
+/// The FK column is `<parent_table>_id`; `array_index` is reserved too, and
+/// subfield columns that collide with either get a numeric suffix. Every
+/// subfield column is nullable.
 pub fn build_child_tables(
     model: &RelationalModel,
     decisions: &NestedDecisions,

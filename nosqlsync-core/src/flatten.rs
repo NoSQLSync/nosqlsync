@@ -15,25 +15,34 @@ use crate::types::{to_column_name, FieldMapping};
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "kebab-case")]
+/// What to do with one nested path. Serialized as `flatten`, `jsonb` or `child-table`.
 pub enum NestedDecision {
+    /// One column per subfield on the parent table.
     Flatten,
+    /// Keep the whole value in one JSON column.
     Jsonb,
+    /// Move the array's elements to a child table.
     ChildTable,
 }
 
 /// Decisions by dot path, e.g. `{ "address": "flatten", "tags": "jsonb" }`.
 pub type NestedDecisions = BTreeMap<String, NestedDecision>;
 
+/// Can this structure take [`NestedDecision::Flatten`]? Any embedded object with at least one subfield.
 pub fn is_flattenable(s: &NestedStructure) -> bool {
     s.kind == NestedKind::EmbeddedObject && !s.sub_fields.is_empty()
 }
 
+/// Can this structure take [`NestedDecision::ChildTable`]? Any array of objects with at least one subfield.
 pub fn is_child_tableable(s: &NestedStructure) -> bool {
     s.kind == NestedKind::ObjectArray && !s.sub_fields.is_empty()
 }
 
 /// The model's own recommendation, for paths the user has not decided:
 /// relational by default, not JSON by default.
+///
+/// Only paths that could be flattened or split get an entry. Object arrays are
+/// left out entirely when `child_tables` is false, so they stay JSON.
 pub fn default_decisions(model: &RelationalModel, child_tables: bool) -> NestedDecisions {
     let mut d = NestedDecisions::new();
     for s in &model.nested {
