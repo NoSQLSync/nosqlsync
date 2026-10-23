@@ -20,7 +20,7 @@ anyhow = "1.0.104"
 clap = { version = "4.6.7", features = ["derive", "env"] }
 futures = "0.3.34"
 mongodb = "3.9.1"
-nosqlsync-core = { version = "0.1.2", path = "../nosqlsync-core" }
+nosqlsync-core = { version = "0.1.3", path = "../nosqlsync-core" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.154", features = ["preserve_order", "float_roundtrip"] }
 sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres"] }

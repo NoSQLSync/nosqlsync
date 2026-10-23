@@ -65,10 +65,11 @@ pub fn get_nested<'a>(doc: &'a Value, path: &str) -> &'a Value {
 
 /// Coerce one source value to the cell its column expects.
 ///
-/// `null` is always [`Cell::Null`]. Booleans are JavaScript truthiness, so
-/// they never fail: `0`, `""` and `NaN` are false, and any other string
-/// (including `"false"`) is true. Dates accept `$date`, `$timestamp`, RFC 3339
-/// or `YYYY-MM-DD` strings, and integers as epoch milliseconds.
+/// `null` is always [`Cell::Null`]. Booleans accept `true`/`false`, numbers
+/// (zero is false), and the strings `true`/`false`, `t`/`f`, `yes`/`no`,
+/// `y`/`n`, `on`/`off` and `1`/`0` in any case; an empty string is `NULL`, and
+/// anything else is a [`CoercionIssue`]. Dates accept `$date`, `$timestamp`,
+/// RFC 3339 or `YYYY-MM-DD` strings, and integers as epoch milliseconds.
 pub fn coerce(value: &Value, m: &FieldMapping) -> Result<Cell, CoercionIssue> {
     if value.is_null() {
         return Ok(Cell::Null);
@@ -97,7 +98,10 @@ pub fn coerce(value: &Value, m: &FieldMapping) -> Result<Cell, CoercionIssue> {
         MongoType::Date => Cell::Timestamp(to_timestamp(value).ok_or_else(fail)?),
         MongoType::Int => Cell::Int(to_i64(&plain).ok_or_else(fail)?),
         MongoType::Double => Cell::Float(to_f64(&plain).ok_or_else(fail)?),
-        MongoType::Boolean => Cell::Bool(truthy(&plain)),
+        MongoType::Boolean => match &plain {
+            Value::String(s) if s.trim().is_empty() => Cell::Null,
+            other => Cell::Bool(to_bool(other).ok_or_else(fail)?),
+        },
         MongoType::Array | MongoType::Object => Cell::Json(plain_json(value)),
         MongoType::Binary => Cell::Bytes(to_bytes(value).ok_or_else(fail)?),
     })
@@ -178,13 +182,19 @@ fn to_f64(v: &Value) -> Option<f64> {
     }
 }
 
-fn truthy(v: &Value) -> bool {
+/// A boolean only where the value clearly means one. The platform's engine uses
+/// JavaScript truthiness here, which loads the string `"false"` as `true`;
+/// anything ambiguous is reported instead of guessed.
+fn to_bool(v: &Value) -> Option<bool> {
     match v {
-        Value::Null => false,
-        Value::Bool(b) => *b,
-        Value::Number(n) => n.as_f64().is_some_and(|f| f != 0.0 && !f.is_nan()),
-        Value::String(s) => !s.is_empty(),
-        _ => true,
+        Value::Bool(b) => Some(*b),
+        Value::Number(n) => n.as_f64().filter(|f| !f.is_nan()).map(|f| f != 0.0),
+        Value::String(s) => match s.trim().to_ascii_lowercase().as_str() {
+            "true" | "t" | "yes" | "y" | "on" | "1" => Some(true),
+            "false" | "f" | "no" | "n" | "off" | "0" => Some(false),
+            _ => None,
+        },
+        _ => None,
     }
 }
 
@@ -402,6 +412,28 @@ mod tests {
             .unwrap(),
             Cell::Timestamp(DateTime::from_timestamp(1_700_000_000, 0).unwrap())
         );
+    }
+
+    #[test]
+    fn booleans_only_where_the_value_is_clear() {
+        let b = m(MongoType::Boolean);
+        let ok = |v: Value| coerce(&v, &b).unwrap();
+        // The bug this replaces: JavaScript truthiness loaded "false" as true.
+        assert_eq!(ok(json!("false")), Cell::Bool(false));
+        assert_eq!(ok(json!("FALSE")), Cell::Bool(false));
+        assert_eq!(ok(json!(" no ")), Cell::Bool(false));
+        assert_eq!(ok(json!("0")), Cell::Bool(false));
+        assert_eq!(ok(json!("True")), Cell::Bool(true));
+        assert_eq!(ok(json!("on")), Cell::Bool(true));
+        assert_eq!(ok(json!(true)), Cell::Bool(true));
+        assert_eq!(ok(json!(0)), Cell::Bool(false));
+        assert_eq!(ok(json!(2)), Cell::Bool(true));
+        assert_eq!(ok(json!("")), Cell::Null);
+        // Ambiguous values are reported, not guessed.
+        for v in [json!("maybe"), json!("n/a"), json!({"a": 1}), json!([true])] {
+            let err = coerce(&v, &b).unwrap_err();
+            assert_eq!(err.expected, MongoType::Boolean);
+        }
     }
 
     #[test]

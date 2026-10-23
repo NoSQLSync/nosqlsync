@@ -6,6 +6,7 @@
 
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
 use futures::TryStreamExt;
@@ -30,18 +31,26 @@ impl Source {
     /// file or a directory of them.
     pub async fn open(spec: &str, database: Option<&str>) -> Result<Source> {
         if spec.starts_with("mongodb://") || spec.starts_with("mongodb+srv://") {
-            let client = mongodb::Client::with_uri_str(spec)
+            let hosts = display_hosts(spec);
+            // A mongodb+srv:// string resolves DNS here, so parsing can fail on the network too.
+            let mut opts = mongodb::options::ClientOptions::parse(spec)
                 .await
-                .context("could not parse the MongoDB connection string")?;
-            let db = match database {
-                Some(name) => client.database(name),
-                None => client
-                    .default_database()
-                    .context("no database in the connection string; pass --db <name>")?,
+                .map_err(|e| connect_error(&e.to_string(), &hosts, true))?;
+            // The driver waits 30 s by default before reporting an unreachable
+            // server; a person at a terminal should hear sooner. A timeout set in
+            // the connection string still wins.
+            opts.server_selection_timeout.get_or_insert(CONNECT_TIMEOUT);
+            opts.connect_timeout.get_or_insert(CONNECT_TIMEOUT);
+            let default_db = opts.default_database.clone();
+            let client = mongodb::Client::with_options(opts)
+                .map_err(|e| connect_error(&e.to_string(), &hosts, true))?;
+            let db = match database.map(str::to_string).or(default_db) {
+                Some(name) => client.database(&name),
+                None => bail!("no database in the connection string; pass --db <name>"),
             };
             db.run_command(doc! { "ping": 1 })
                 .await
-                .context("could not reach MongoDB")?;
+                .map_err(|e| connect_error(&e.to_string(), &hosts, false))?;
             return Ok(Source::Mongo { db });
         }
         let path = Path::new(spec);
@@ -333,6 +342,61 @@ impl Source {
     }
 }
 
+/// How long to wait for a MongoDB server before giving up, unless the
+/// connection string sets `serverSelectionTimeoutMS` / `connectTimeoutMS`.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The hosts in a connection string, for error messages: never the user or password.
+fn display_hosts(spec: &str) -> String {
+    let rest = spec.split_once("://").map_or(spec, |(_, r)| r);
+    let rest = rest.rsplit_once('@').map_or(rest, |(_, r)| r);
+    rest.split(['/', '?']).next().unwrap_or("").to_string()
+}
+
+/// A connection failure in words a person can act on, instead of the driver's
+/// full topology dump. Unrecognised errors keep the driver's message, shortened.
+fn connect_error(driver: &str, hosts: &str, parsing: bool) -> anyhow::Error {
+    let text = driver.to_ascii_lowercase();
+    let has = |needles: &[&str]| needles.iter().any(|n| text.contains(n));
+    let secs = CONNECT_TIMEOUT.as_secs();
+    let message = if has(&["authentication failed", "auth error", "scram"]) {
+        format!(
+            "MongoDB at {hosts} rejected the credentials. Check the user and password in --source, \
+             and authSource (often `admin`)."
+        )
+    } else if has(&["connection refused"]) {
+        format!(
+            "could not reach MongoDB at {hosts} (connection refused). Is mongod running, and are the \
+             host and port in --source right?"
+        )
+    } else if has(&[
+        "failed to lookup address",
+        "nodename nor servname",
+        "name or service not known",
+        "no record found",
+        "dns",
+    ]) {
+        format!("could not resolve the MongoDB host {hosts}. Check the hostname in --source.")
+    } else if has(&["certificate", "tls", "ssl", "handshake"]) {
+        format!(
+            "the TLS connection to MongoDB at {hosts} failed. Check the tls options in --source, and \
+             that the server is set up for TLS."
+        )
+    } else if parsing {
+        let short: String = driver.chars().take(300).collect();
+        return anyhow::anyhow!("could not parse the MongoDB connection string: {short}");
+    } else if has(&["server selection timeout", "timed out"]) {
+        format!(
+            "could not reach MongoDB at {hosts} within {secs} seconds. Check the host, the port and \
+             network access (for MongoDB Atlas, the project's IP access list)."
+        )
+    } else {
+        let short: String = driver.chars().take(300).collect();
+        format!("could not reach MongoDB at {hosts}: {short}")
+    };
+    anyhow::anyhow!(message)
+}
+
 fn to_ejson(d: Document) -> Value {
     Bson::Document(d).into_canonical_extjson()
 }
@@ -424,4 +488,65 @@ fn for_each_file_doc(path: &Path, mut f: impl FnMut(Value) -> bool) -> Result<()
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hosts_never_include_credentials() {
+        assert_eq!(
+            display_hosts("mongodb://user:p%40ss@db1:27017,db2:27017/shop?replicaSet=rs"),
+            "db1:27017,db2:27017"
+        );
+        assert_eq!(
+            display_hosts("mongodb+srv://u:p@cluster0.example.net/shop"),
+            "cluster0.example.net"
+        );
+        assert_eq!(display_hosts("mongodb://localhost"), "localhost");
+        // An `@` inside the password must not leak its tail.
+        assert_eq!(display_hosts("mongodb://u:a@b@host:1/db"), "host:1");
+    }
+
+    #[test]
+    fn explains_the_common_failures() {
+        let msg = |driver: &str, parsing: bool| {
+            connect_error(driver, "localhost:27017", parsing).to_string()
+        };
+        // Real driver output when nothing listens on the port.
+        let refused = "Kind: Server selection timeout: No available servers. Topology: { Type: Unknown, Servers: [ { Address: localhost:27017, Type: Unknown, Error: Kind: I/O error: Connection refused (os error 61), labels: {} } ] }";
+        assert_eq!(
+            msg(refused, false),
+            "could not reach MongoDB at localhost:27017 (connection refused). Is mongod running, and are the host and port in --source right?"
+        );
+        assert!(msg(
+            "Kind: An error occurred during DNS resolution: no record found for Query",
+            true
+        )
+        .starts_with("could not resolve the MongoDB host"));
+        assert!(msg(
+            "failed to lookup address information: nodename nor servname provided",
+            false
+        )
+        .starts_with("could not resolve"));
+        assert!(msg(
+            "Kind: Authentication failed: SCRAM failure: bad auth",
+            false
+        )
+        .contains("rejected the credentials"));
+        assert!(msg("invalid peer certificate: UnknownIssuer", false).contains("TLS connection"));
+        assert!(msg(
+            "Kind: Server selection timeout: No available servers",
+            false
+        )
+        .contains("within 10 seconds"));
+        assert!(msg(
+            "Kind: An invalid argument was provided: unknown option foo",
+            true
+        )
+        .starts_with("could not parse the MongoDB connection string"));
+        // Anything unrecognised keeps the driver's words, shortened.
+        assert!(msg(&"x".repeat(1000), false).len() < 400);
+    }
 }

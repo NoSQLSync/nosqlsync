@@ -225,6 +225,63 @@ mod tests {
     }
 
     #[test]
+    fn nested_fields_get_the_precise_types_too() {
+        use crate::transform::{child_rows, transform_doc, Cell};
+        let uuid = json!({"$binary": {"base64": "ABEiM0RVZneImaq7zN3u/w==", "subType": "04"}});
+        let docs: Vec<Value> = (0..2)
+            .map(|i| {
+                json!({
+                    "_id": {"$oid": format!("507f1f77bcf86cd79943901{i}")},
+                    "stats": {"views": {"$numberLong": "9007199254740993"}, "label": "x"},
+                    "items": [{"qty": {"$numberLong": "5000000000"}, "price": {"$numberDecimal": "19.90"}, "token": uuid}],
+                })
+            })
+            .collect();
+        let p = analyze_collection("orders", &docs, Dialect::Postgresql, Detect::Bson, None).plan;
+        let ty = |fields: &[FieldMapping], col: &str| {
+            fields
+                .iter()
+                .find(|f| f.target_column == col)
+                .unwrap()
+                .sql_type
+                .clone()
+        };
+
+        // Flattened object.
+        assert_eq!(ty(&p.fields, "stats_views"), "BIGINT");
+        // Child table.
+        let items = &p.child_tables[0];
+        assert_eq!(ty(&items.fields, "qty"), "BIGINT");
+        assert_eq!(ty(&items.fields, "price"), "NUMERIC");
+        assert_eq!(ty(&items.fields, "token"), "UUID");
+
+        // And the values convert exactly, through the same columns.
+        let mut issues = vec![];
+        let row = transform_doc(&docs[0], &p.fields, &mut issues);
+        let views = p
+            .fields
+            .iter()
+            .position(|f| f.target_column == "stats_views")
+            .unwrap();
+        assert_eq!(row[views], Cell::Int(9_007_199_254_740_993));
+        let child = child_rows(&docs[0], items, &row[0], &mut issues);
+        let col = |name: &str| {
+            2 + items
+                .fields
+                .iter()
+                .position(|f| f.target_column == name)
+                .unwrap()
+        };
+        assert_eq!(child[0][col("qty")], Cell::Int(5_000_000_000));
+        assert_eq!(child[0][col("price")], Cell::Numeric("19.90".into()));
+        assert_eq!(
+            child[0][col("token")],
+            Cell::Text("00112233-4455-6677-8899-aabbccddeeff".into())
+        );
+        assert!(issues.is_empty(), "{issues:?}");
+    }
+
+    #[test]
     fn replanning_keeps_user_edits() {
         let first =
             analyze_collection("orders", &docs(), Dialect::Postgresql, Detect::Bson, None).plan;
