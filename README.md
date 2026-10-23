@@ -39,7 +39,14 @@ orders → table orders (300 documents sampled)
 
 ## Install
 
-With [Homebrew](https://brew.sh) on macOS or Linux:
+Run it without installing anything, with Node.js 18 or later:
+
+```sh
+npx nosqlsync analyze -s "mongodb://localhost/shop"
+```
+
+Or install it with npm (`npm install -g nosqlsync`), or with
+[Homebrew](https://brew.sh) on macOS or Linux:
 
 ```sh
 brew install nosqlsync/tap/nosqlsync
