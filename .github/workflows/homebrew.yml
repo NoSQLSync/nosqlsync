@@ -1,0 +1,73 @@
+name: Homebrew
+
+# Regenerates Formula/nosqlsync.rb in NoSQLSync/homebrew-tap from a published
+# release's checksums. Called by the release workflow after each release; can
+# also be run by hand (Actions → Homebrew → Run workflow) to repair the tap.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, e.g. v0.1.1"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  formula:
+    name: update homebrew-tap
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag }}
+    steps:
+      - name: Check for HOMEBREW_TAP_TOKEN
+        id: token
+        env:
+          TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::warning::HOMEBREW_TAP_TOKEN is not set, so the Homebrew tap was not updated."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.token.outputs.ok == 'true'
+
+      - name: Render formula
+        if: steps.token.outputs.ok == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir sums
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.sha256' --dir sums
+          .github/homebrew/formula.sh "$TAG" sums > nosqlsync.rb
+          ruby -c nosqlsync.rb
+
+      - uses: actions/checkout@v4
+        if: steps.token.outputs.ok == 'true'
+        with:
+          repository: NoSQLSync/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Commit and push
+        if: steps.token.outputs.ok == 'true'
+        run: |
+          cp nosqlsync.rb tap/Formula/nosqlsync.rb
+          cd tap
+          if git diff --quiet; then
+            echo "Formula is already up to date for $TAG."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "nosqlsync ${TAG#v}"
+          git push
