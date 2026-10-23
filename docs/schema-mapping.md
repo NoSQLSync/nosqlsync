@@ -43,11 +43,8 @@ The `_id` column is `VARCHAR(24)` for ObjectIds; an `_id` of another type
 keeps that type (a long string `_id` becomes `TEXT`, a numeric one `INTEGER`
 or `BIGINT`).
 
-The `BIGINT`, `NUMERIC` and `UUID` choices apply to top-level fields. Fields
-inside a flattened object or a child table use the basic mapping, so an
-`Int64` there becomes `INTEGER` and a `Decimal128` becomes
-`DOUBLE PRECISION`. Change those columns' `sqlType` in the plan if you need
-the wider type.
+The `BIGINT`, `NUMERIC` and `UUID` choices apply to every column, including
+fields inside a flattened object or a child table.
 
 ### Fields with more than one type
 
@@ -128,9 +125,10 @@ Each value is converted to its column's type as it loads:
   Fractional values in an integer column are truncated.
 - **Dates** accept BSON dates, ISO-8601 strings, `YYYY-MM-DD`, and epoch
   milliseconds.
-- **Booleans** follow JavaScript's rules: `0`, `""` and `null` are false;
-  any other number and any non-empty string is true, **including the string
-  `"false"`**. If a boolean field holds strings, retype it to `TEXT` in the plan.
+- **Booleans** accept `true` and `false`, numbers (`0` is false, any other
+  number true), and the strings `true`/`false`, `t`/`f`, `yes`/`no`, `y`/`n`,
+  `on`/`off` and `1`/`0` in any case. An empty string loads as `NULL`. Any other
+  value, such as `"maybe"`, is reported rather than guessed.
 - **Text** columns store strings as they are, and numbers and booleans as
   their text. Objects and arrays in a text column are stored as JSON.
 - **JSONB** columns store the value with Extended JSON unwrapped: ObjectIds

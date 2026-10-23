@@ -18,7 +18,8 @@ use serde_json::{Map, Value};
 
 use crate::collate::locale_cmp;
 use crate::ejson::{detect, Detect};
-use crate::types::{to_column_name, to_sql_type, Dialect, MongoType};
+use crate::infer::TypeHints;
+use crate::types::{to_column_name, Dialect, MongoType};
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "kebab-case")]
@@ -53,7 +54,8 @@ pub struct SubField {
     pub name: String,
     /// Most frequent non-null type; ties go to the type seen first. `Null` if never non-null.
     pub mongo_type: MongoType,
-    /// The generic [`to_sql_type`] for `mongo_type`, with no `BIGINT`/`NUMERIC`/`UUID` refinement.
+    /// The column type for `mongo_type`, with the same `BIGINT` / `NUMERIC` / `UUID`
+    /// refinements top-level fields get.
     pub sql_type: String,
     /// Fraction of the containing structures where this field is present, 0–1.
     pub presence: f64,
@@ -152,6 +154,7 @@ const MIN_FREQUENCY: f64 = 0.05;
 struct SubFieldStats {
     types: Vec<MongoType>,
     seen: usize,
+    hints: TypeHints,
 }
 
 struct StructureStats {
@@ -303,6 +306,7 @@ fn record_sub_fields(stats: &mut StructureStats, obj: &Map<String, Value>, mode:
         let t = detect(v, mode);
         if t != MongoType::Null {
             sub.types.push(t);
+            sub.hints.observe(t, v);
         }
     }
 }
@@ -344,7 +348,8 @@ fn build_structure(
             SubField {
                 name: name.clone(),
                 mongo_type: t,
-                sql_type: to_sql_type(t, dialect).to_string(),
+                // Same precise types (BIGINT, NUMERIC, UUID) as top-level fields.
+                sql_type: st.hints.sql_type(t, dialect).to_string(),
                 presence: if s.instances > 0 {
                     st.seen as f64 / s.instances as f64
                 } else {

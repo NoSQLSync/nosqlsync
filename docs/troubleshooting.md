@@ -5,21 +5,38 @@ from MongoDB or PostgreSQL after a colon. Look up the first part here.
 
 ## Connecting
 
-### `could not reach MongoDB`
+nosqlsync waits up to 10 seconds for a MongoDB server before giving up. To
+wait longer, add `serverSelectionTimeoutMS` to the connection string, for
+example `?serverSelectionTimeoutMS=30000`. The messages below name the hosts
+from `--source`, and never the user or password.
 
-nosqlsync parsed the connection string but couldn't talk to the server. The
-cause follows the message:
+### ``could not reach MongoDB at host:port (connection refused)``
 
-- **`Connection refused`**: nothing is listening at that host and port. Check
-  that `mongod` is running and that the host and port in `--source` are right
-  (`27017` by default).
-- **`Server selection timeout`** with a DNS or TLS error: check the hostname,
-  and for MongoDB Atlas, that your IP address is in the project's network
-  access list.
-- **`Authentication failed`**: check the user and password, and that the user
-  is defined on the database in `authSource` (often `admin`).
+Nothing is listening at that host and port. Check that `mongod` is running and
+that the host and port in `--source` are right (`27017` by default).
 
-nosqlsync waits up to 30 seconds for a server before giving up.
+### ``could not resolve the MongoDB host …``
+
+The hostname doesn't exist in DNS. Check it for typos. For MongoDB Atlas, copy
+the connection string again from the cluster's **Connect** dialog.
+
+### ``MongoDB at … rejected the credentials``
+
+Check the user and password, and that the user is defined on the database in
+`authSource`, which is usually `admin`. Passwords with characters such as `@`,
+`:` or `/` must be percent-encoded (`@` → `%40`).
+
+### ``the TLS connection to MongoDB at … failed``
+
+The connection string asks for TLS (`tls=true`, or any `mongodb+srv://` string)
+and the TLS handshake failed. Either the server isn't set up for TLS, or its
+certificate isn't trusted. Check the `tls` options in `--source`.
+
+### ``could not reach MongoDB at … within 10 seconds``
+
+The server didn't answer in time and gave no other reason. Check the host, the
+port and the network path. For MongoDB Atlas, add your IP address to the
+project's **Network Access** list.
 
 ### `could not parse the MongoDB connection string`
 

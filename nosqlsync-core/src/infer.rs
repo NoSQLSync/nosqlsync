@@ -47,35 +47,75 @@ pub fn collect_fields(doc: &Value, stats: &mut Stats, mode: Detect) {
             continue;
         }
         field.types.push(t);
-        // The value's size is only a sample; a BSON Int64 says the app stores 64-bit numbers.
-        if t == MongoType::Int && (!fits_i32(value) || is_int64(value)) {
-            field.wide_int = true;
-        }
-        if is_decimal(value) {
-            field.decimal = true;
-        }
-        if t == MongoType::Binary {
-            field.binaries += 1;
-            if as_uuid(value).is_some() {
-                field.uuids += 1;
-            }
-        }
+        let mut hints = field.hints();
+        hints.observe(t, value);
+        (field.wide_int, field.decimal, field.binaries, field.uuids) =
+            (hints.wide_int, hints.decimal, hints.binaries, hints.uuids);
         if field.sample_values.len() < 3 {
             field.sample_values.push(sample_value(value));
         }
     }
 }
 
+impl FieldStats {
+    fn hints(&self) -> TypeHints {
+        TypeHints {
+            wide_int: self.wide_int,
+            decimal: self.decimal,
+            binaries: self.binaries,
+            uuids: self.uuids,
+        }
+    }
+}
+
+/// What the values seen for one field say about the precise column type it
+/// needs. Shared by top-level fields and by the subfields of flattened objects
+/// and child tables, so every column is typed the same way.
+#[derive(Default, Clone, Copy, Debug)]
+pub(crate) struct TypeHints {
+    wide_int: bool,
+    decimal: bool,
+    binaries: usize,
+    uuids: usize,
+}
+
+impl TypeHints {
+    /// Record one non-null value of detected type `t`.
+    pub(crate) fn observe(&mut self, t: MongoType, value: &Value) {
+        // The value's size is only a sample; a BSON Int64 says the app stores 64-bit numbers.
+        if t == MongoType::Int && (!fits_i32(value) || is_int64(value)) {
+            self.wide_int = true;
+        }
+        if is_decimal(value) {
+            self.decimal = true;
+        }
+        if t == MongoType::Binary {
+            self.binaries += 1;
+            if as_uuid(value).is_some() {
+                self.uuids += 1;
+            }
+        }
+    }
+
+    /// The column type for values resolved to `resolved`.
+    pub(crate) fn sql_type(&self, resolved: MongoType, dialect: Dialect) -> &'static str {
+        if resolved == MongoType::Int && self.wide_int {
+            return wide_int_type(dialect);
+        }
+        precise_type(resolved, self, dialect).unwrap_or_else(|| to_sql_type(resolved, dialect))
+    }
+}
+
 /// PostgreSQL types that keep more than the generic map does. Departures from
 /// the TypeScript engine, which maps Decimal128 to a float and UUIDs to bytes.
-fn precise_type(resolved: MongoType, stat: &FieldStats, dialect: Dialect) -> Option<&'static str> {
+fn precise_type(resolved: MongoType, hints: &TypeHints, dialect: Dialect) -> Option<&'static str> {
     if dialect != Dialect::Postgresql {
         return None;
     }
     match resolved {
         // Money stored as Decimal128 must not round through a float.
-        MongoType::Double if stat.decimal => Some(NUMERIC),
-        MongoType::Binary if stat.binaries > 0 && stat.uuids == stat.binaries => Some(UUID),
+        MongoType::Double if hints.decimal => Some(NUMERIC),
+        MongoType::Binary if hints.binaries > 0 && hints.uuids == hints.binaries => Some(UUID),
         _ => None,
     }
 }
@@ -132,12 +172,8 @@ pub fn build_field_mappings(
             }
             let sql_type = if is_pk && resolved == MongoType::ObjectId {
                 "VARCHAR(24)".to_string()
-            } else if resolved == MongoType::Int && stat.wide_int {
-                wide_int_type(dialect).to_string()
-            } else if let Some(t) = precise_type(resolved, stat, dialect) {
-                t.to_string()
             } else {
-                to_sql_type(resolved, dialect).to_string()
+                stat.hints().sql_type(resolved, dialect).to_string()
             };
             FieldMapping {
                 source_field: field.clone(),
