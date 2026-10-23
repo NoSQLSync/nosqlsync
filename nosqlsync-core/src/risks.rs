@@ -9,18 +9,25 @@ use crate::types::{to_column_name, FieldMapping, MongoType};
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 #[serde(rename_all = "lowercase")]
+/// How much a [`Risk`] matters. Orders `Warning` before `Info`.
 pub enum Severity {
+    /// Data may load differently than expected or a load may not resume.
     Warning,
+    /// Worth knowing; nothing is lost.
     Info,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
+/// One finding in the risk report.
 pub struct Risk {
+    /// Warning or info.
     pub severity: Severity,
     /// Stable machine-readable code, e.g. `mixed-types`.
     pub code: String,
+    /// Source dot path the finding is about.
     pub path: String,
+    /// One-sentence explanation for a person.
     pub message: String,
 }
 
@@ -99,6 +106,14 @@ const RESERVED: &[&str] = &[
     "with",
 ];
 
+/// Build the risk report for one collection, warnings first.
+///
+/// Codes: `mixed-id-types`, `mixed-types` (non-numeric mixes only; Int with
+/// Double is not flagged), `column-collision`, `irregular-array` and
+/// `huge-array` (over 1000 elements on average) are warnings; `wide-integer`,
+/// `sparse` (present in under 50% of documents), `reserved-word` and
+/// `deep-nesting` (4 or more levels) are info. `total` is the number of
+/// documents sampled.
 pub fn assess(
     stats: &Stats,
     total: usize,

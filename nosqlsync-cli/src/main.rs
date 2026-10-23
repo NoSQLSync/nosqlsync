@@ -29,6 +29,7 @@ enum Command {
     Analyze {
         #[command(flatten)]
         source: SourceArgs,
+        /// Output format: `text` for the terminal, `markdown` for docs and PRs, `json` for tooling.
         #[arg(long, value_enum, default_value_t = Format::Text)]
         format: Format,
     },
@@ -68,6 +69,7 @@ enum Command {
         source: SourceArgs,
         #[command(flatten)]
         target: TargetArgs,
+        /// Plan to validate against. Without one, a plan is inferred with the defaults.
         #[arg(long)]
         plan: Option<PathBuf>,
         /// Documents to compare per collection.

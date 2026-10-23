@@ -20,6 +20,7 @@ use crate::types::MongoType;
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "lowercase")]
+/// How to detect special types in a document (see the module docs).
 pub enum Detect {
     /// Canonical Extended JSON from a driver: only wrappers mark special types.
     Bson,
@@ -105,6 +106,8 @@ pub fn is_js_integer(n: &Number) -> bool {
         .is_some_and(|f| f.is_finite() && f.fract() == 0.0)
 }
 
+/// The [`MongoType`] of one value. An object is its wrapper's type if it is an
+/// Extended JSON wrapper (see [`wrapper_type`]), otherwise `Object`.
 pub fn detect(value: &Value, mode: Detect) -> MongoType {
     match value {
         Value::Null => MongoType::Null,
@@ -218,6 +221,7 @@ pub fn plain_json(value: &Value) -> Value {
     }
 }
 
+/// Epoch milliseconds → `YYYY-MM-DDTHH:MM:SS.mmmZ`, or `None` if out of chrono's range.
 pub fn millis_to_iso(ms: i64) -> Option<String> {
     chrono::DateTime::from_timestamp_millis(ms)
         .map(|d| d.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string())

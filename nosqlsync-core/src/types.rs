@@ -6,23 +6,38 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// The source type of a value, as detected by [`crate::ejson::detect`].
+///
+/// Coarser than BSON: several BSON types share one variant (see each variant).
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[serde(rename_all = "camelCase")]
 pub enum MongoType {
+    /// An ObjectId (`$oid`), or in [`Detect::Json`](crate::ejson::Detect::Json) mode a 24-hex string.
     ObjectId,
+    /// A string, plus the opaque scalars (`$regularExpression`, `$code`, `$symbol`, …).
     String,
+    /// An integer: a JSON number with no fraction, `$numberInt` or `$numberLong`.
     Int,
+    /// A non-integer number, `$numberDouble` or `$numberDecimal`.
     Double,
+    /// `true` or `false`.
     Boolean,
+    /// A `$date`, a BSON `$timestamp`, or in `Json` mode an ISO-8601 string.
     Date,
+    /// A JSON array.
     Array,
+    /// An object that is not an Extended JSON wrapper.
     Object,
+    /// JSON `null`.
     Null,
+    /// `$binary` or `$uuid`.
     Binary,
+    /// Never produced by detection; typed and coerced as text if it appears in a plan.
     Unknown,
 }
 
 impl MongoType {
+    /// The camelCase name, the same string serde uses (`objectId`, `int`, …).
     pub fn as_str(self) -> &'static str {
         match self {
             MongoType::ObjectId => "objectId",
@@ -40,31 +55,52 @@ impl MongoType {
     }
 }
 
+/// A target SQL dialect. Serialized in lowercase (`postgresql`, `mssql`, …).
+///
+/// Every dialect has a type map and identifier quoting; only PostgreSQL gets
+/// the precise `NUMERIC`/`UUID` types, and only PostgreSQL, MySQL and MariaDB
+/// get child tables (see [`crate::child_tables::supports_child_tables`]).
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[serde(rename_all = "lowercase")]
 pub enum Dialect {
+    /// PostgreSQL.
     Postgresql,
+    /// MySQL.
     Mysql,
+    /// MariaDB; same type map as MySQL.
     Mariadb,
+    /// Google BigQuery.
     Bigquery,
+    /// Snowflake.
     Snowflake,
+    /// Amazon Redshift.
     Redshift,
+    /// ClickHouse.
     Clickhouse,
+    /// Microsoft SQL Server.
     Mssql,
 }
 
+/// One source field mapped to one target column. This is what the plan file
+/// stores per column, so `target_column` and `sql_type` are the user-editable parts.
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct FieldMapping {
     /// Dot path in the source document, e.g. `address.city`.
     pub source_field: String,
+    /// Column name in the target table.
     pub target_column: String,
     /// Every type observed for this field.
     pub mongo_types: Vec<MongoType>,
+    /// The single type the column is coerced to (see [`resolve_conflicting_types`]).
     pub resolved_mongo_type: MongoType,
+    /// Column type as written into the DDL, e.g. `TEXT` or `BIGINT`.
     pub sql_type: String,
+    /// Whether the column allows NULL. Ignored for the primary key, which is always `NOT NULL`.
     pub nullable: bool,
+    /// True only for the mapping of `_id`.
     pub is_primary_key: bool,
+    /// Up to three sample values from inference; empty for flattened and child-table columns.
     #[serde(default)]
     pub sample_values: Vec<Value>,
     /// 0–1, how often this field was null or missing in the sample.
@@ -86,6 +122,12 @@ const TYPE_PRIORITY: [MongoType; 11] = [
     MongoType::Unknown,
 ];
 
+/// One type for a field that held several.
+///
+/// Nulls are ignored (all-null resolves to `Null`). Int with Double widens to
+/// Double; any mix involving an array or object is `Array` if every type is an
+/// array, otherwise `Object` (a JSON column either way). Other mixes take the
+/// highest-priority type, so `Int` with `String` resolves to `String`.
 pub fn resolve_conflicting_types(types: &[MongoType]) -> MongoType {
     let mut unique: Vec<MongoType> = Vec::new();
     for t in types {
@@ -119,6 +161,9 @@ pub fn resolve_conflicting_types(types: &[MongoType]) -> MongoType {
     MongoType::String
 }
 
+/// The generic SQL type for a source type in one dialect, e.g. `Date` →
+/// `TIMESTAMPTZ` on PostgreSQL. Inference may pick a wider or more precise
+/// type than this (see [`wide_int_type`] and [`crate::infer::build_field_mappings`]).
 pub fn to_sql_type(t: MongoType, dialect: Dialect) -> &'static str {
     use MongoType as M;
     match dialect {
@@ -214,6 +259,17 @@ static LEADING_DIGIT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^([0-9])")
 
 /// MongoDB field name → safe snake_case SQL column name.
 /// `createdAt` → `created_at`, `userID` → `user_id`, `2fa` → `_2fa`.
+///
+/// Any character outside `[A-Za-z0-9_]`, including the `.` of a dot path,
+/// becomes `_`:
+///
+/// ```
+/// use nosqlsync_core::types::to_column_name;
+///
+/// assert_eq!(to_column_name("HTTPServer"), "http_server");
+/// assert_eq!(to_column_name("address.city"), "address_city");
+/// assert_eq!(to_column_name("first name"), "first_name");
+/// ```
 pub fn to_column_name(field: &str) -> String {
     let s = CAMEL.replace_all(field, "${1}_${2}");
     let s = ACRONYM.replace_all(&s, "${1}_${2}");
@@ -255,8 +311,10 @@ pub fn column_definitions(mappings: &[FieldMapping], dialect: Dialect) -> Vec<St
         .collect()
 }
 
+/// Options for [`generate_ddl_with`].
 #[derive(Default, Clone, Copy)]
 pub struct DdlOptions {
+    /// Emit `CREATE TABLE IF NOT EXISTS`.
     pub if_not_exists: bool,
 }
 
@@ -265,6 +323,7 @@ pub fn generate_ddl(table: &str, mappings: &[FieldMapping], dialect: Dialect) ->
     generate_ddl_with(table, mappings, dialect, DdlOptions::default())
 }
 
+/// [`generate_ddl`] with options.
 pub fn generate_ddl_with(
     table: &str,
     mappings: &[FieldMapping],

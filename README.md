@@ -1,5 +1,10 @@
 # nosqlsync
 
+[![crates.io](https://img.shields.io/crates/v/nosqlsync.svg)](https://crates.io/crates/nosqlsync)
+[![npm](https://img.shields.io/npm/v/nosqlsync.svg)](https://www.npmjs.com/package/nosqlsync)
+[![CI](https://github.com/NoSQLSync/nosqlsync/actions/workflows/ci.yml/badge.svg)](https://github.com/NoSQLSync/nosqlsync/actions/workflows/ci.yml)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
+
 **Migrate MongoDB to PostgreSQL with a schema you'd actually design.**
 
 Most MongoDB → Postgres tools give you one table per collection with a `JSONB`
@@ -158,6 +163,17 @@ value is written never counts as a mismatch. The report (`--report report.md`
 or `.json`) says **passed**, **failed** or **incomplete**. A check that couldn't
 fully run is reported as incomplete, never as passed.
 
+## Documentation
+
+- [Getting started](https://github.com/NoSQLSync/nosqlsync/blob/main/docs/getting-started.md): install to a validated migration
+- [Sources](https://github.com/NoSQLSync/nosqlsync/blob/main/docs/sources.md): MongoDB, JSON and NDJSON files, DynamoDB exports
+- [How the schema is chosen](https://github.com/NoSQLSync/nosqlsync/blob/main/docs/schema-mapping.md): types, nested documents, child tables, indexes
+- [The plan file](https://github.com/NoSQLSync/nosqlsync/blob/main/docs/plan-file.md): every field, and how to edit it
+- [Loading and resuming](https://github.com/NoSQLSync/nosqlsync/blob/main/docs/loading.md) · [Validation](https://github.com/NoSQLSync/nosqlsync/blob/main/docs/validation.md)
+- [Commands and options](https://github.com/NoSQLSync/nosqlsync/blob/main/docs/commands.md): every flag, environment variable and exit code
+- [Troubleshooting](https://github.com/NoSQLSync/nosqlsync/blob/main/docs/troubleshooting.md): every error message and its fix
+- [Changelog](https://github.com/NoSQLSync/nosqlsync/blob/main/CHANGELOG.md)
+
 ## Scope
 
 This is a one-time bulk migration tool, and it does that well. It does not
@@ -187,9 +203,11 @@ mapping, relational decision, child table and index. Where this crate
 deliberately differs (Int64, Decimal128, UUID, BSON Timestamp, non-ObjectId
 `_id`, colliding column names), the difference is there to keep a load correct.
 
-Issues and pull requests are welcome.
+Issues and pull requests are welcome; see
+[CONTRIBUTING.md](https://github.com/NoSQLSync/nosqlsync/blob/main/CONTRIBUTING.md).
+To report a security problem, see [SECURITY.md](https://github.com/NoSQLSync/nosqlsync/blob/main/SECURITY.md).
 
 ## License
 
-Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
-[MIT license](LICENSE-MIT) at your option.
+Licensed under either of [Apache License, Version 2.0](https://github.com/NoSQLSync/nosqlsync/blob/main/LICENSE-APACHE)
+or [MIT license](https://github.com/NoSQLSync/nosqlsync/blob/main/LICENSE-MIT) at your option.

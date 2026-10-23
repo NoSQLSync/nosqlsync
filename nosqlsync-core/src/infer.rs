@@ -10,11 +10,16 @@ use crate::types::{
     MongoType,
 };
 
+/// What was observed for one top-level field across the sampled documents.
 #[derive(Default, Clone, Debug)]
 pub struct FieldStats {
+    /// The detected type of every non-null occurrence, repeats included.
     pub types: Vec<MongoType>,
+    /// The first three non-null values, as [`sample_value`] renders them.
     pub sample_values: Vec<Value>,
+    /// Documents in which the field is present, including as `null`.
     pub seen_count: usize,
+    /// Documents in which the field is an explicit `null`.
     pub null_count: usize,
     /// An integer outside the 32-bit range, or a BSON Int64, was seen.
     pub wide_int: bool,
@@ -22,6 +27,7 @@ pub struct FieldStats {
     pub decimal: bool,
     /// Binary values seen, and how many of them were UUIDs.
     pub binaries: usize,
+    /// Binary values that were UUIDs (`$uuid`, or `$binary` subtype 04).
     pub uuids: usize,
 }
 
@@ -29,6 +35,7 @@ pub struct FieldStats {
 pub type Stats = IndexMap<String, FieldStats>;
 
 /// Accumulate type info for each top-level field of one document.
+/// Nested fields are not visited; [`crate::relational`] handles those.
 pub fn collect_fields(doc: &Value, stats: &mut Stats, mode: Detect) {
     let Value::Object(obj) = doc else { return };
     for (key, value) in obj {
@@ -73,7 +80,10 @@ fn precise_type(resolved: MongoType, stat: &FieldStats, dialect: Dialect) -> Opt
     }
 }
 
+/// The PostgreSQL type inference picks for a field that held a Decimal128.
+/// [`crate::transform::coerce`] matches on it to emit an exact [`Numeric`](crate::transform::Cell::Numeric) cell.
 pub const NUMERIC: &str = "NUMERIC";
+/// The PostgreSQL type inference picks for a binary field whose every value was a UUID.
 pub const UUID: &str = "UUID";
 
 fn fits_i32(value: &Value) -> bool {
@@ -178,12 +188,19 @@ pub fn dedupe_columns(mappings: &mut [FieldMapping]) {
     }
 }
 
+/// The output of [`infer_schema`].
 pub struct InferenceResult {
+    /// One mapping per top-level field, ordered as [`build_field_mappings`] orders them.
     pub fields: Vec<FieldMapping>,
+    /// The raw per-field stats the mappings were built from.
     pub stats: Stats,
+    /// Number of documents passed in.
     pub total_docs_sampled: usize,
 }
 
+/// Infer one column per top-level field of `docs`: [`collect_fields`] over
+/// every document, then [`build_field_mappings`]. Non-object documents are skipped
+/// but still count towards the total, so they raise every field's `null_fraction`.
 pub fn infer_schema(docs: &[Value], dialect: Dialect, mode: Detect) -> InferenceResult {
     let mut stats = Stats::new();
     for doc in docs {

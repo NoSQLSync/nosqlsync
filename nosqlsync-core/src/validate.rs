@@ -185,33 +185,49 @@ pub fn compare_named(
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "lowercase")]
+/// The outcome of validating a table, or a whole run.
 pub enum Verdict {
+    /// Every check ran and found nothing.
     Passed,
+    /// A count mismatch, a missing row, or a differing value.
     Failed,
+    /// Nothing failed, but not everything could be checked.
     Incomplete,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
+/// One sampled document whose row (or child rows) differ from the source.
 pub struct Mismatch {
+    /// The document's primary key, as text.
     pub primary_key: String,
     /// Table the mismatch is in (the parent, or a child table).
     pub table: String,
+    /// Names of the columns that differ.
     pub columns: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
+/// Validation result for one collection and its parent table.
 pub struct TableReport {
+    /// Source collection name.
     pub collection: String,
+    /// Target parent table name.
     pub table: String,
+    /// Documents in the source collection; `None` if it could not be counted.
     pub source_count: Option<u64>,
+    /// Rows in the target table.
     pub target_count: u64,
+    /// Whether the two counts agree; `None` when `source_count` is.
     pub count_match: Option<bool>,
+    /// Documents sampled for row-by-row comparison.
     pub sampled: usize,
     /// Sampled documents with no row in the target at all.
     pub missing: Vec<String>,
+    /// Sampled documents whose row exists but differs.
     pub mismatches: Vec<Mismatch>,
+    /// From [`verdict`].
     pub verdict: Verdict,
 }
 
@@ -232,6 +248,8 @@ pub fn verdict(
     }
 }
 
+/// The run's verdict: failed if any table failed, incomplete if any table is
+/// incomplete or there are no tables, otherwise passed.
 pub fn overall(tables: &[TableReport]) -> Verdict {
     if tables.iter().any(|t| t.verdict == Verdict::Failed) {
         Verdict::Failed
